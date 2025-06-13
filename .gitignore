@@ -1,0 +1,12 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environment and config files
+.env
+.env.*
+.vcs/
+
+# Secrets
+secrets.toml
