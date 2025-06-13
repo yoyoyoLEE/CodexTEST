@@ -5,7 +5,6 @@ __pycache__/
 
 # Environment and config files
 .env
-.env.*
 .vcs/
 
 # Secrets
