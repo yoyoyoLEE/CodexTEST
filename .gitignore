@@ -9,3 +9,4 @@ __pycache__/
 
 # Secrets
 secrets.toml
+.vcs/settings.local.json
