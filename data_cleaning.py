@@ -8,6 +8,12 @@ import numpy as np
 
 def basic_imputation(df):
     """Fill missing values with mean (numeric) or mode (categorical)"""
+    # Make a copy to avoid modifying original
+    df = df.copy()
+    
+    # Convert all columns to string for categorical imputation
+    str_df = df.astype(str)
+    
     # Separate numeric and categorical columns
     numeric_cols = df.select_dtypes(include=np.number).columns
     cat_cols = df.select_dtypes(exclude=np.number).columns
@@ -22,15 +28,13 @@ def basic_imputation(df):
         )
         df[numeric_cols] = imputed_numeric
     
-    # Impute categorical columns with mode
+    # Impute categorical columns with mode (using string representation)
     if len(cat_cols) > 0:
-        cat_imputer = SimpleImputer(strategy='most_frequent')
-        imputed_cat = pd.DataFrame(
-            cat_imputer.fit_transform(df[cat_cols]),
-            columns=cat_cols,
-            index=df.index
-        )
-        df[cat_cols] = imputed_cat
+        # Handle each column separately to avoid mixed type issues
+        for col in cat_cols:
+            if df[col].notna().any():  # Only impute if there are some values
+                mode_val = str_df[col].mode()[0] if not str_df[col].mode().empty else ''
+                df[col] = df[col].fillna(mode_val)
     
     return df
 
@@ -42,7 +46,7 @@ def groupwise_imputation(df, group_col=None):
     for col in df.columns:
         if col != group_col:
             df[col] = df.groupby(group_col)[col].transform(
-                lambda x: x.fillna(x.mean() if pd.api.types.is_numeric_dtype(x) else x.mode()[0])
+                lambda x: x.fillna(x.mean() if pd.api.types.is_numeric_dtype(x) else (x.mode()[0] if not x.mode().empty else ''))
             )
     return df
 
@@ -62,6 +66,7 @@ def mice_imputation(df, estimator=RandomForestRegressor()):
 
 def auto_impute(df):
     """Automatically select best imputation method based on cross-validation"""
-    # For simplicity, we'll just use basic imputation here
-    # In a real implementation, you would compare methods
+    # Clean up any empty columns first
+    df = df.dropna(axis=1, how='all')
+    # Use basic imputation as fallback
     return basic_imputation(df)
