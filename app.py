@@ -1,7 +1,10 @@
 import streamlit as st
 import os
 import pandas as pd
+import numpy as np
+import httpx
 from dotenv import load_dotenv
+from sklearn.impute import SimpleImputer, KNNImputer
 from data_cleaning import (
     basic_imputation,
     groupwise_imputation,
@@ -56,33 +59,133 @@ if api_key:
             
             st.write("Missing Values Summary:")
             st.dataframe(df.isnull().sum().rename("Missing Values"))
+
+            # Automatic analysis on upload
+            if 'analysis_done' not in st.session_state or st.session_state.uploaded_file != uploaded_file.name:
+                with st.spinner("Analyzing data with AI..."):
+                    import asyncio
+                    analysis = asyncio.run(llm_client.analyze_data(df))
+                    if analysis:
+                        st.session_state.analysis = analysis["choices"][0]["message"]["content"]
+                        st.session_state.analysis_done = True
+                        st.session_state.uploaded_file = uploaded_file.name
             
-            method = st.selectbox(
-                "Select imputation method:",
-                ["Basic (mean/mode)", "Group-wise", "KNN", "MICE", "Auto"]
-            )
-            
-            if st.button("Clean Data"):
-                with st.spinner("Cleaning data..."):
-                    if method == "Basic (mean/mode)":
-                        cleaned_df = basic_imputation(df.copy())
-                    elif method == "Group-wise":
-                        group_col = st.selectbox("Select grouping column:", df.columns)
-                        cleaned_df = groupwise_imputation(df.copy(), group_col)
-                    elif method == "KNN":
-                        cleaned_df = knn_imputation(df.copy())
-                    elif method == "MICE":
-                        cleaned_df = mice_imputation(df.copy())
-                    else:
-                        cleaned_df = auto_impute(df.copy())
+            if 'analysis' in st.session_state:
+                st.subheader("AI Cleaning Suggestions")
+                st.write(st.session_state.analysis)
+                
+                if st.button("Apply Suggestions"):
+                    with st.spinner("Generating and executing cleaning code..."):
+                        # Generate cleaning code based on analysis
+                        prompt = f"""
+                        Based on these data cleaning suggestions:
+                        {st.session_state.analysis}
                         
-                    st.write("Cleaned Data:")
-                    st.dataframe(cleaned_df)
-                    st.download_button(
-                        "Download Cleaned Data",
-                        cleaned_df.to_csv(index=False),
-                        "cleaned_data.csv"
-                    )
+                        Generate clean, executable Python code using pandas to implement these suggestions.
+                        The code must:
+                        1. Start with all required imports (pandas as pd, numpy as np)
+                        2. Operate on a dataframe variable called 'df'
+                        3. Be properly formatted with correct Python syntax
+                        4. Include exactly one complete code block
+                        5. Have no markdown, explanations or comments
+                        6. Handle all edge cases mentioned in the suggestions
+                        7. Use errors='coerce' when converting to numeric
+                        8. Handle string values carefully when converting to numbers
+                        
+                        Example of valid output:
+                        import pandas as pd
+                        import numpy as np
+                        # Clean string columns first
+                        df['duration'] = df['duration'].str.extract('(\d+)')[0]
+                        # Then convert to numeric
+                        df['duration'] = pd.to_numeric(df['duration'], errors='coerce')
+                        # Handle missing values
+                        df = df.fillna(df.mean())
+                        """
+                        
+                        headers = {
+                            "Authorization": f"Bearer {api_key}",
+                            "Content-Type": "application/json"
+                        }
+
+                        payload = {
+                            "model": "deepseek/deepseek-chat-v3-0324:free",
+                            "messages": [{"role": "user", "content": prompt}],
+                            "temperature": 0.3,
+                            "max_tokens": 1000
+                        }
+
+                        try:
+                            with httpx.Client() as client:
+                                response = client.post(
+                                    f"{llm_client.base_url}/chat/completions",
+                                    headers=headers,
+                                    json=payload,
+                                    timeout=30.0
+                                )
+                                response.raise_for_status()
+                                raw_response = response.json()["choices"][0]["message"]["content"]
+                                
+                                # Extract just the code block from the response
+                                code = ""
+                                in_code_block = False
+                                for line in raw_response.split('\n'):
+                                    if line.strip().startswith('```python'):
+                                        in_code_block = True
+                                        continue
+                                    elif line.strip() == '```':
+                                        in_code_block = False
+                                        continue
+                                    if in_code_block or (line.strip() and not line.strip().startswith('#')):
+                                        code += line + '\n'
+                                
+                                # Validate and execute the generated code
+                                try:
+                                    # First check syntax
+                                    compile(code, '<string>', 'exec')
+                                    if not code.strip():
+                                        raise ValueError("No executable code was generated")
+                                    
+                                    # Then execute in a safe environment with proper imports
+                                    local_vars = {'df': df.copy()}
+                                    global_vars = {
+                                        'pd': pd,
+                                        'np': np,
+                                        'basic_imputation': basic_imputation,
+                                        'groupwise_imputation': groupwise_imputation,
+                                        'knn_imputation': knn_imputation,
+                                        'mice_imputation': mice_imputation,
+                                        'SimpleImputer': SimpleImputer,
+                                        'KNNImputer': KNNImputer
+                                    }
+                                    exec(code, global_vars, local_vars)
+                                    cleaned_df = local_vars['df']
+                                    
+                                    st.success("Suggestions applied successfully!")
+                                    st.write("Cleaned Data:")
+                                    st.dataframe(cleaned_df)
+                                    st.download_button(
+                                        "Download Cleaned Data",
+                                        cleaned_df.to_csv(index=False),
+                                        "cleaned_data.csv"
+                                    )
+                                    
+                                    st.subheader("Applied Cleaning Code:")
+                                    st.code(code, language='python')
+                                    
+                                except SyntaxError as e:
+                                    st.error(f"Invalid code generated:\n{e}")
+                                    st.code(code, language='python')
+                                    st.warning("Please try analyzing the data again or provide more specific instructions")
+                                except Exception as e:
+                                    st.error(f"Error executing cleaning code:\n{e}")
+                                    st.code(code, language='python')
+                                    st.warning("The generated code may need manual adjustment")
+                                    
+                        except httpx.HTTPStatusError as e:
+                            st.error(f"API request failed: {e.response.status_code} {e.response.reason_phrase}")
+                        except Exception as e:
+                            st.error(f"Error generating cleaning code: {str(e)}")
     
     with tab2:
         # AI Assistant interface
