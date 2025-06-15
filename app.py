@@ -8,11 +8,11 @@ def get_api_key():
     """Get API key from Streamlit secrets or .env file"""
     try:
         # Try to get from Streamlit secrets (production)
-        return st.secrets["cline"]["api_key"]
+        return st.secrets["openrouter"]["api_key"]
     except:
         try:
             # Fallback to .env file (development)
-            return os.getenv("CLINE_API_KEY")
+            return os.getenv("OPENROUTER_API_KEY")
         except:
             return None
 
@@ -34,6 +34,6 @@ if api_key:
 else:
     st.error("""
         API key not found. Please configure:
-        1. For local development: Create .env file with CLINE_API_KEY
-        2. For production: Add to Streamlit secrets.toml
+        1. For local development: Create .env file with OPENROUTER_API_KEY
+        2. For production: Add to Streamlit secrets.toml under [openrouter] section
     """)

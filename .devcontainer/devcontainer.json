@@ -1,9 +1,0 @@
-{
-    "name": "Python with Cline",
-    "image": "mcr.microsoft.com/devcontainers/python:3.11",
-    "extensions": [
-        "vcstudio.cline"
-    ],
-    "postCreateCommand": "pip install -r requirements.txt && [ -f .vcs/settings.local.json ] && cp .vcs/settings.local.json .vcs/settings.json || true",
-    "remoteUser": "vscode"
-}
